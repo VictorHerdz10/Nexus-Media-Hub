@@ -2,6 +2,7 @@
 import { useAppStore } from "../stores/appStore";
 import { useCallback } from "react";
 import { indexedDBService } from "../utils/indexedDB";
+import { toast } from "sonner"; // ← Importar Sonner
 
 interface FileSystemItem {
   name: string;
@@ -10,9 +11,34 @@ interface FileSystemItem {
   handle?: any;
 }
 
+
 export function useFileSystem() {
   const { setFiles, setSelectedFile, setCurrentFolder, setFileSystemItems } =
     useAppStore();
+
+  // Verificar si File System Access API está disponible
+  const isFileSystemAPISupported = useCallback((): boolean => {
+    const supported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+    
+    // Toast para debug
+    if (supported) {
+      toast.success("✅ File System API disponible", {
+        description: "Puedes seleccionar carpetas completas"
+      });
+    } else {
+      toast.warning("⚠️ File System API no disponible", {
+        description: "Usando selección de archivos individuales"
+      });
+    }
+    
+    return supported;
+  }, []);
+
+  // Verificar si es móvil (solo para mostrar mensajes diferentes)
+  const isMobile = useCallback((): boolean => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  }, []);
+
   const loadDirectoryContents = useCallback(
     async (directoryHandle: any): Promise<FileSystemItem[]> => {
       const items: FileSystemItem[] = [];
@@ -79,38 +105,94 @@ export function useFileSystem() {
     [setFiles, setFileSystemItems]
   );
 
-  const selectFolder = useCallback(async () => {
-    try {
-      // @ts-expect-error - File System Access API
-      const directoryHandle = await window.showDirectoryPicker();
+  // Método alternativo para cuando File System API no está disponible
+  const selectFilesFallback = useCallback(async (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'image/*,video/*,audio/*';
+      
+      input.onchange = async (e) => {
+        const files = Array.from((e.target as HTMLInputElement).files || []);
+        
+        if (files.length > 0) {
+          // Crear una estructura similar a FileSystemItem para mantener compatibilidad
+          const items: FileSystemItem[] = files.map(file => ({
+            name: file.name,
+            kind: 'file' as const,
+            file: file,
+            handle: null
+          }));
 
-      const folderData = {
-        name: directoryHandle.name,
-        handle: directoryHandle,
+          setFiles(files);
+          setFileSystemItems(items);
+          
+          // Simular una carpeta para mantener la estructura
+          setCurrentFolder({
+            name: 'Archivos Seleccionados',
+            handle: null
+          });
+
+          // Guardar en caché
+          localStorage.setItem('nexus-current-folder', JSON.stringify({
+            name: 'Archivos Seleccionados'
+          }));
+          localStorage.setItem('nexus-cache-timestamp', Date.now().toString());
+          
+          resolve(true);
+        } else {
+          resolve(false);
+        }
       };
-      setCurrentFolder(folderData);
 
-      await indexedDBService.saveDirectoryHandle(
-        directoryHandle.name,
-        directoryHandle
-      );
+      input.oncancel = () => {
+        resolve(false);
+      };
 
-      // Guardar en caché con timestamp
-      localStorage.setItem(
-        "nexus-current-folder",
-        JSON.stringify({
-          name: folderData.name,
-        })
-      );
-      localStorage.setItem("nexus-cache-timestamp", Date.now().toString());
-      await loadDirectoryContents(directoryHandle);
+      input.click();
+    });
+  }, [setFiles, setFileSystemItems, setCurrentFolder]);
 
-      return true;
-    } catch (error) {
-      console.log("❌ Usuario canceló la selección de carpeta", error);
-      return false;
+  // Función principal para seleccionar carpeta/archivos
+  const selectFolder = useCallback(async (): Promise<boolean> => {
+    if (isFileSystemAPISupported()) {
+      // Usar File System Access API (disponible en Chrome desktop y móvil)
+      try {
+        // @ts-expect-error - File System Access API
+        const directoryHandle = await window.showDirectoryPicker();
+
+        const folderData = {
+          name: directoryHandle.name,
+          handle: directoryHandle,
+        };
+        setCurrentFolder(folderData);
+
+        await indexedDBService.saveDirectoryHandle(
+          directoryHandle.name,
+          directoryHandle
+        );
+
+        localStorage.setItem(
+          "nexus-current-folder",
+          JSON.stringify({
+            name: folderData.name,
+          })
+        );
+        localStorage.setItem("nexus-cache-timestamp", Date.now().toString());
+        await loadDirectoryContents(directoryHandle);
+
+        return true;
+      } catch (error) {
+        console.log("❌ Usuario canceló la selección de carpeta", error);
+        return false;
+      }
+    } else {
+      // Fallback: input file múltiple
+      console.log("File System API no disponible, usando fallback");
+      return await selectFilesFallback();
     }
-  }, [loadDirectoryContents, setCurrentFolder]);
+  }, [isFileSystemAPISupported, selectFilesFallback, loadDirectoryContents, setCurrentFolder]);
 
   const loadFiles = useCallback(
     async (directoryHandle: any) => {
@@ -338,5 +420,7 @@ export function useFileSystem() {
     filterByType,
     sortItems,
     isMediaFile,
+    isFileSystemAPISupported,
+    isMobile,
   };
 }
