@@ -21,16 +21,16 @@ export function useFileSystem() {
     const supported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
     
     // Toast para debug
-    if (supported) {
-      toast.success("✅ File System API disponible", {
-        description: "Puedes seleccionar carpetas completas"
-      });
-    } else {
-      toast.warning("⚠️ File System API no disponible", {
-        description: "Usando selección de archivos individuales"
-      });
-    }
-    
+    //if (supported) {
+    //  toast.success("✅ File System API disponible", {
+    //    description: "Puedes seleccionar carpetas completas"
+    //  });
+    //} else {
+    //  toast.warning("⚠️ File System API no disponible", {
+    //    description: "Usando selección de archivos individuales"
+    //  });
+    //}
+    //
     return supported;
   }, []);
 
